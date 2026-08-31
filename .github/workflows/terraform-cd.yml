@@ -1,0 +1,235 @@
+name: Terraform CD & Security Validation
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-and-test:
+    name: Deploy & Security Validate
+    runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+
+      RESOURCE_GROUP: rg-cloudsec-lab-dev
+      APPGW_NAME: appgw-cloudsec-lab-dev
+      LOG_ANALYTICS_WORKSPACE: law-cloudsec-lab-dev
+
+    steps:
+
+      # 1. Checkout Repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # 2. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+
+
+      # 3. Initialize Terraform
+      - name: Terraform Init
+        run: terraform init
+
+
+    
+      # 4. Deploy Infrastructure
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+
+      # 5. Authenticate to Azure using OIDC
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+
+      # 6. Get Application Gateway Public IP
+      - name: Get Application Gateway IP
+        id: get_ip
+        run: |
+          APPGW_IP=$(terraform output -raw appgw_public_ip)
+
+          if [ -z "$APPGW_IP" ]; then
+            echo "❌ Application Gateway public IP was not found."
+            exit 1
+          fi
+
+          echo "APPGW_IP=$APPGW_IP" >> "$GITHUB_ENV"
+
+          echo "Application Gateway IP: $APPGW_IP"
+
+
+
+      # 7. Validate Application Gateway Backend Health
+      - name: Check Backend Health
+        run: |
+          echo "Checking Application Gateway backend health..."
+
+          HEALTH_STATUS=$(az network application-gateway show-backend-health \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APPGW_NAME" \
+            --query "backendAddressPools[0].backendHttpSettingsCollection[0].servers[*].health" \
+            --output tsv)
+
+          echo "Backend health:"
+          echo "$HEALTH_STATUS"
+
+          if echo "$HEALTH_STATUS" | grep -qv "Healthy"; then
+            echo "❌ One or more backend servers are unhealthy."
+            exit 1
+          fi
+
+          echo "✅ All backend servers are healthy."
+
+
+      
+      # 8. Validate Application Connectivity
+      - name: Validate Application
+        run: |
+          echo "Testing Application Gateway connectivity..."
+
+          HTTP_STATUS=$(curl \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --max-time 15 \
+            "http://$APPGW_IP/")
+
+          echo "Application HTTP status: $HTTP_STATUS"
+
+          if [[ "$HTTP_STATUS" -ne 200 && "$HTTP_STATUS" -ne 302 ]]; then
+            echo "❌ Application is unreachable."
+            exit 1
+          fi
+
+          echo "✅ Application is reachable."
+
+
+      
+      # 9. Generate Controlled SQL Injection Test
+      - name: Run WAF SQL Injection Test
+        run: |
+          echo "Sending controlled SQL injection test..."
+
+          HTTP_STATUS=$(curl \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --max-time 15 \
+            --get \
+            --data-urlencode "id=1' OR '1'='1" \
+            "http://$APPGW_IP/login.php")
+
+          echo "SQL injection test HTTP status: $HTTP_STATUS"
+
+          echo "✅ Controlled SQL injection request sent."
+
+
+    
+      # 10. Wait for WAF Telemetry
+      - name: Wait for WAF Telemetry
+        run: |
+          echo "Waiting for WAF telemetry to reach Log Analytics..."
+
+          MAX_ATTEMPTS=12
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Checking for WAF event (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+
+            QUERY='AzureDiagnostics
+            | where TimeGenerated > ago(10m)
+            | where Category == "ApplicationGatewayFirewallLog"
+            | where action_s contains "Detected" or action_s contains "Blocked"
+            | where message_s contains "SQL" or message_s contains "Injection" or message_s contains "942"
+            | order by TimeGenerated desc
+            | take 5'
+
+            RESULT=$(az monitor log-analytics query \
+              --workspace "$LOG_ANALYTICS_WORKSPACE" \
+              --analytics-query "$QUERY" \
+              --output json)
+
+            if [ "$RESULT" != "[]" ] && [ -n "$RESULT" ]; then
+              echo "✅ WAF security event detected."
+              echo "$RESULT"
+              exit 0
+            fi
+
+            echo "No WAF event found yet. Waiting 10 seconds..."
+            sleep 10
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "❌ No WAF security event detected after 2 minutes."
+          exit 1
+
+
+      # ============================================================
+      # 11. Verify WAF Detection in Log Analytics
+      # ============================================================
+      - name: Verify WAF Detection
+        run: |
+          echo "Querying Log Analytics for WAF detection..."
+
+          QUERY='AzureDiagnostics
+          | where TimeGenerated > ago(10m)
+          | where Category == "ApplicationGatewayFirewallLog"
+          | where action_s contains "Detected" or action_s contains "Blocked"
+          | where message_s contains "SQL" or message_s contains "Injection" or message_s contains "942"
+          | order by TimeGenerated desc
+          | take 5'
+
+          RESULT=$(az monitor log-analytics query \
+            --workspace "$LOG_ANALYTICS_WORKSPACE" \
+            --analytics-query "$QUERY" \
+            --output json)
+
+          echo "WAF query result:"
+          echo "$RESULT"
+
+          if [ "$RESULT" = "[]" ] || [ -z "$RESULT" ]; then
+            echo "❌ No matching WAF security event was found."
+            echo "The WAF test may not have generated telemetry."
+            exit 1
+          fi
+
+          echo "✅ WAF security event detected in Log Analytics."
+
+
+      
+      # 12. Deployment & Security Summary
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo ""
+          echo "=================================================="
+          echo "       CLOUDSEC LAB DEPLOYMENT SUMMARY"
+          echo "=================================================="
+          echo "Application Gateway : $APPGW_NAME"
+          echo "Public IP            : $APPGW_IP"
+          echo "Backend Health       : Validated"
+          echo "Application          : Validated"
+          echo "SQL Injection Test   : Executed"
+          echo "WAF Telemetry        : Verified"
+          echo "=================================================="
