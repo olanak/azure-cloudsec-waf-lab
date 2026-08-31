@@ -9,17 +9,11 @@
 
 </div>
 
-<sub>
-
 An end-to-end Azure cloud security and DevSecOps lab, built with Terraform. It deploys an intentionally vulnerable web app behind Azure Application Gateway WAF, adds network segmentation and backend health monitoring, and wires everything into a GitHub Actions pipeline that validates the infrastructure, the security controls, and the WAF telemetry on every change.
-
-</sub>
 
 ---
 
 ## Project Goals and Architecture
-
-<sub>
 
 The core objective is to establish a vulnerable environment, defend it with a WAF, and capture attack telemetry, all provisioned via Infrastructure as Code (IaC).
 
@@ -27,45 +21,29 @@ The core objective is to establish a vulnerable environment, defend it with a WA
 - **The Defense (WAF):** An Azure Application Gateway (v2) acting as a reverse proxy, inspecting all incoming traffic against the OWASP Core Rule Set to detect and block malicious payloads.
 - **The Telemetry (SIEM):** A Log Analytics Workspace configured to ingest `ApplicationGatewayFirewallLog` events, providing visibility into attack vectors and blocked requests.
 
-</sub>
-
 ---
 
 ## DevSecOps Pipeline Lifecycle
 
-<sub>
-
 Rather than manual provisioning, the entire architecture is managed through GitHub Actions, enforcing security checks before code is merged and validating defenses post-deployment.
 
-</sub>
-
 ### Continuous Integration (Pull Requests)
-
-<sub>
 
 - **Secret Scanning:** Gitleaks scans the commit history to prevent hardcoded credentials.
 - **Code Formatting:** `terraform fmt` and `validate` ensure syntax consistency.
 - **Static Application Security Testing (SAST):** Checkov scans the Terraform code against CIS Azure benchmarks to block insecure cloud configurations before deployment.
 - **Plan Visibility:** The pipeline generates a speculative deployment plan and posts it as a PR comment for reviewer approval.
 
-</sub>
-
 ### Continuous Delivery (Main Branch)
-
-<sub>
 
 - **Passwordless Authentication:** Utilizes Azure OpenID Connect (OIDC) to generate short-lived tokens, eliminating the need for stored service principal secrets.
 - **State Management:** Infrastructure state is securely locked and tracked in an encrypted Azure Storage Account.
 - **Automated Security Testing:** Post-deployment, the pipeline automatically fires a live SQL Injection payload (`1' OR '1'='1`) against the WAF to trigger a security event.
 - **Telemetry Validation:** The pipeline automatically queries the Log Analytics Workspace to guarantee the WAF successfully detected and logged the automated attack.
 
-</sub>
-
 ---
 
 ## Repository Structure
-
-<sub>
 
 ```
 .
@@ -83,29 +61,19 @@ Rather than manual provisioning, the entire architecture is managed through GitH
 └── README.md
 ```
 
-</sub>
-
 ---
 
 ## Manual Attack Simulation
-
-<sub>
 
 Once the CI/CD pipeline successfully deploys the infrastructure, manual attacks can be simulated against the Application Gateway Public IP to generate further SIEM logs.
 
 **Cross-Site Scripting (XSS):**
 
-</sub>
-
 ```bash
 curl "http://<APP_GW_IP>/?search=<script>alert('XSS')</script>"
 ```
 
-<sub>
-
 **SQL Injection (SQLi):**
-
-</sub>
 
 ```bash
 curl "http://<APP_GW_IP>/login.php?id=1'%20OR%20'1'='1"
@@ -115,11 +83,7 @@ curl "http://<APP_GW_IP>/login.php?id=1'%20OR%20'1'='1"
 
 ## Log Querying
 
-<sub>
-
 Navigate to the Log Analytics Workspace in the Azure Portal and use Kusto Query Language (KQL) to view the WAF interventions:
-
-</sub>
 
 ```kql
 AzureDiagnostics
@@ -130,11 +94,9 @@ AzureDiagnostics
 ---
 
 <div align="center">
-<sub>
 
 ## Author
 
 **Olana Kenea**
 
-</sub>
 </div>
