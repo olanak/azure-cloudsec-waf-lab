@@ -1,564 +1,74 @@
 # Azure Cloud Security WAF Lab
 
+[![Terraform CI](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-ci.yml/badge.svg)](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-ci.yml)
+[![Terraform CD](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-cd.yml/badge.svg)](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-cd.yml)
+![Terraform](https://img.shields.io/badge/Terraform-IaC-844FBA?logo=terraform&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-Cloud-0078D4?logo=microsoftazure&logoColor=white)
+![OIDC](https://img.shields.io/badge/Auth-OIDC-2E7D32)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
+An end-to-end Azure cloud security and DevSecOps lab, built with Terraform. It deploys an intentionally vulnerable web app behind Azure Application Gateway WAF, adds network segmentation and backend health monitoring, and wires everything into a GitHub Actions pipeline that validates the infrastructure, the security controls, and the WAF telemetry on every change.
 
+## What it does
 
-\
+Traffic comes in through a public IP and hits Azure Application Gateway, running the WAF_v2 SKU with the OWASP Core Rule Set in detection mode. From there it's routed to a backend pool of two DVWA VMs on Ubuntu, which Application Gateway continuously health-checks. Every WAF event is streamed to Log Analytics through Azure Monitor, so there's a real audit trail to check against.
 
-An end-to-end **Azure Cloud Security and DevSecOps lab** built with Terraform.
+On top of that sits a two-stage GitHub Actions pipeline. Pull requests trigger a CI run that scans for secrets and misconfigurations and posts a Terraform plan back to the PR. Merges to `main` trigger a CD run that applies the change and then actively tests it — checking backend health, hitting the app over HTTP, firing a controlled SQL injection at it, and confirming the WAF actually logged it.
 
-The project deploys an intentionally vulnerable web application behind **Azure Application Gateway WAF**, implements network segmentation and backend health monitoring, and uses **GitHub Actions CI/CD** to automatically validate infrastructure, security controls, application availability, and WAF telemetry.
+```
+Internet → Public IP → Application Gateway (WAF_v2, OWASP CRS, Detection Mode)
+                              │
+                        Backend Pool
+                        ┌─────┴─────┐
+                     DVWA VM 1   DVWA VM 2
+                        └─────┬─────┘
+                        Health Probe
 
----
+WAF events → Azure Monitor → Log Analytics
 
-## 🔗 Project Links
-
-| Resource        | Link                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 📦 Repository   | [Azure Cloud Security WAF Lab](https://github.com/olanak/azure-cloudsec-waf-lab)                                          |
-| 🔍 Terraform CI | [Terraform CI & Security](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-ci.yml)            |
-| 🚀 Terraform CD | [Terraform CD & Security Validation](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-cd.yml) |
-| 🏗️ Terraform   | [`terraform/`](./terraform)                                                                                               |
-| ⚙️ CI Workflow  | [`terraform-ci.yml`](./.github/workflows/terraform-ci.yml)                                                                |
-| 🚀 CD Workflow  | [`terraform-cd.yml`](./.github/workflows/terraform-cd.yml)                                                                |
-
----
-
-# 🏗️ Architecture
-
-```text
-                         Internet
-                            │
-                            │ HTTP
-                            ▼
-                  ┌─────────────────────┐
-                  │    Azure Public IP   │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-              ┌─────────────────────────────┐
-              │    Azure Application         │
-              │       Gateway WAF_v2         │
-              │                             │
-              │   ┌──────────────────────┐  │
-              │   │    Azure WAF Policy  │  │
-              │   │     OWASP CRS 3.2   │  │
-              │   │    Detection Mode    │  │
-              │   └──────────────────────┘  │
-              └──────────────┬──────────────┘
-                             │
-                       Backend Pool
-                             │
-                  ┌──────────┴──────────┐
-                  │                     │
-                  ▼                     ▼
-          ┌───────────────┐     ┌───────────────┐
-          │    DVWA VM 1  │     │    DVWA VM 2  │
-          │ Ubuntu Linux  │     │ Ubuntu Linux  │
-          │   10.0.2.x    │     │   10.0.2.x    │
-          └───────────────┘     └───────────────┘
-                  │                     │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  Application Gateway
-                     Health Probe
-                             │
-                             ▼
-                    Backend Health
-
-
-       ┌─────────────────────────────────────┐
-       │          Security Telemetry         │
-       │                                     │
-       │ WAF → Azure Monitor → Log Analytics │
-       └─────────────────────────────────────┘
-
-
-                    GitHub Actions
-                          │
-             ┌────────────┴────────────┐
-             │                         │
-             ▼                         ▼
-      ┌──────────────┐          ┌──────────────┐
-      │ Terraform CI │          │ Terraform CD │
-      │              │          │              │
-      │ Gitleaks     │          │ Apply        │
-      │ Checkov      │          │ Health Test  │
-      │ Validate     │          │ App Test     │
-      │ Plan         │          │ WAF Test     │
-      └──────────────┘          └──────────────┘
+GitHub Actions: CI (Gitleaks, Checkov, validate, plan)
+                CD (apply, health test, app test, WAF test)
 ```
 
----
+## Why it exists
 
-# 🎯 Project Objectives
+This project is meant to show a realistic cloud security workflow end to end, not just a pile of Terraform resources. That means:
 
-This project demonstrates practical **Cloud Security, Infrastructure as Code, and DevSecOps** capabilities.
+- Provisioning real Azure infrastructure — a segmented VNet, an Application Gateway WAF, NSGs, health probes — entirely through code.
+- Actually enforcing security controls (OWASP managed rules) and proving they work, rather than just declaring them.
+- Scanning the infrastructure code itself for secrets and misconfigurations before anything gets deployed.
+- Authenticating GitHub Actions to Azure with OIDC instead of a long-lived client secret.
+- Verifying, automatically and after every deploy, that the WAF is not just present but genuinely producing telemetry.
 
-### Infrastructure
+## Azure infrastructure
 
-* Provision Azure infrastructure using Terraform
-* Build a segmented Azure Virtual Network
-* Deploy Application Gateway WAF
-* Deploy two Linux-based DVWA backend servers
-* Configure backend health probes
-* Configure Network Security Groups
-* Implement Application Gateway routing
-
-### Security
-
-* Implement Azure Web Application Firewall
-* Use OWASP managed rules
-* Perform controlled SQL injection testing
-* Generate WAF security telemetry
-* Verify security events through Log Analytics
-* Scan Terraform for security misconfigurations
-* Detect accidentally committed secrets
-
-### DevSecOps
-
-* Automate Terraform validation
-* Automate infrastructure security scanning
-* Generate Terraform plans for pull requests
-* Post Terraform plan results directly to PRs
-* Automatically deploy approved changes
-* Perform post-deployment security validation
-* Authenticate GitHub Actions to Azure using OIDC
-
----
-
-# ☁️ Azure Infrastructure
-
-The environment is built using Terraform and consists of the following components:
-
-```text
+```
 Resource Group
-│
 ├── Virtual Network
-│   │
-│   ├── Application Gateway Subnet
-│   │   └── 10.0.1.0/24
-│   │
-│   └── Backend Subnet
-│       └── 10.0.2.0/24
-│
+│   ├── Application Gateway Subnet (10.0.1.0/24)
+│   └── Backend Subnet (10.0.2.0/24)
 ├── Network Security Group
-│   └── Backend HTTP Rule
-│
-├── Application Gateway
-│   ├── WAF_v2
-│   ├── Public IP
-│   ├── HTTP Listener
-│   ├── Backend Pool
-│   ├── HTTP Settings
-│   └── Health Probe
-│
-├── WAF Policy
-│   └── OWASP Managed Rules
-│
+├── Application Gateway (WAF_v2, Public IP, Listener, Backend Pool, Health Probe)
+├── WAF Policy (OWASP Managed Rules)
 ├── Availability Set
-│
-├── DVWA VM 1
-│   └── Network Interface
-│
-├── DVWA VM 2
-│   └── Network Interface
-│
+├── DVWA VM 1 + NIC
+├── DVWA VM 2 + NIC
 └── Log Analytics Workspace
 ```
 
----
+## The WAF, in practice
 
-# 🛡️ Web Application Firewall
+The WAF policy runs in detection mode on purpose — this is a lab meant for testing, not a locked-down production gateway. To prove it's working, the pipeline sends a controlled SQL injection request:
 
-Azure Application Gateway is configured with the `WAF_v2` SKU.
-
-The WAF policy uses the OWASP managed rule set and operates in **Detection mode**.
-
-This mode is intentional for the security-testing portion of the lab.
-
-The pipeline sends a controlled SQL injection request:
-
-```text
+```
 GET /login.php?id=1' OR '1'='1
 ```
 
-The request passes through:
+That request flows through Application Gateway, into the WAF, gets flagged by OWASP rule detection, and lands in Log Analytics as a WAF log entry. The CD pipeline then queries Log Analytics to confirm the event actually showed up — the test isn't considered passed until the log entry is there.
 
-```text
-Internet
-    │
-    ▼
-Application Gateway
-    │
-    ▼
-Azure WAF
-    │
-    ▼
-OWASP Rule Detection
-    │
-    ▼
-WAF Log
-    │
-    ▼
-Log Analytics
-```
+## Backend health
 
-The CI/CD pipeline then verifies that the security event was recorded.
-
----
-
-# ❤️ Backend Health Monitoring
-
-Application Gateway continuously checks the backend servers using a custom HTTP health probe.
-
-```text
-Application Gateway
-        │
-        ├── Health Probe
-        │
-        ├── VM 1 → Healthy
-        │
-        └── VM 2 → Healthy
-```
-
-The deployment pipeline queries Azure:
-
-```bash
-az network application-gateway show-backend-health
-```
-
-If one or more backend servers are unhealthy, the deployment validation fails.
-
----
-
-# 🔄 CI Pipeline
-
-The CI pipeline runs automatically when Terraform files are changed in a Pull Request.
-
-### Workflow
-
-```text
-Pull Request
-     │
-     ▼
-Checkout
-     │
-     ▼
-Gitleaks
-     │
-     ▼
-Terraform fmt
-     │
-     ▼
-Terraform init
-     │
-     ▼
-Terraform validate
-     │
-     ▼
-Checkov
-     │
-     ▼
-Terraform plan
-     │
-     ▼
-Plan posted to PR
-     │
-     ▼
-Pass / Fail
-```
-
-### CI Security Controls
-
-#### Gitleaks
-
-Detects accidentally committed credentials and secrets.
-
-#### Terraform Format
-
-```bash
-terraform fmt -check -recursive
-```
-
-Ensures Terraform configuration follows consistent formatting.
-
-#### Terraform Validate
-
-```bash
-terraform validate
-```
-
-Checks Terraform configuration for structural and configuration errors.
-
-#### Checkov
-
-Scans the Terraform configuration for cloud security misconfigurations and insecure infrastructure patterns.
-
-#### Terraform Plan
-
-The pipeline generates a Terraform execution plan and posts the result directly into the Pull Request.
-
-If the plan fails, the failure is reported in the PR while the workflow still ultimately returns a failed status.
-
-### 🔍 View CI Runs
-
-**[Terraform CI & Security → GitHub Actions](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-ci.yml)**
-
----
-
-# 🚀 CD Pipeline
-
-Once changes are merged into `main`, the CD pipeline deploys the infrastructure.
-
-```text
-Merge to main
-      │
-      ▼
-Terraform Init
-      │
-      ▼
-Terraform Apply
-      │
-      ▼
-Azure OIDC Authentication
-      │
-      ▼
-Get Application Gateway IP
-      │
-      ▼
-Backend Health Validation
-      │
-      ▼
-Application Connectivity Test
-      │
-      ▼
-Controlled SQL Injection Test
-      │
-      ▼
-Wait / Poll for WAF Telemetry
-      │
-      ▼
-Verify WAF Detection
-      │
-      ▼
-Deployment Summary
-```
-
-### Post-Deployment Validation
-
-The pipeline automatically verifies:
-
-* Application Gateway deployment
-* Backend server health
-* Application availability
-* HTTP connectivity
-* WAF security testing
-* WAF telemetry
-* Log Analytics events
-
-### 🔍 View CD Runs
-
-**[Terraform CD & Security Validation → GitHub Actions](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-cd.yml)**
-
----
-
-# 🔐 Azure Authentication
-
-GitHub Actions authenticates to Azure using **OpenID Connect (OIDC)**.
-
-Instead of storing an Azure client secret in GitHub, the workflow uses:
-
-```text
-GitHub Actions
-      │
-      │ OIDC
-      ▼
-Microsoft Entra ID
-      │
-      ▼
-Azure Service Principal
-      │
-      ▼
-Azure Resources
-```
-
-The workflow uses:
-
-```yaml
-ARM_USE_OIDC: true
-```
-
-This eliminates the need for long-lived Azure client secrets.
-
-Required GitHub repository secrets:
-
-```text
-AZURE_CLIENT_ID
-AZURE_SUBSCRIPTION_ID
-AZURE_TENANT_ID
-```
-
----
-
-# 🔒 Security Validation
-
-The project implements security validation at multiple stages.
-
-| Stage        | Security Control         |
-| ------------ | ------------------------ |
-| Pull Request | Gitleaks                 |
-| Pull Request | Checkov                  |
-| Pull Request | Terraform Validate       |
-| Pull Request | Terraform Plan           |
-| Deployment   | Azure OIDC               |
-| Deployment   | Backend Health           |
-| Deployment   | Application Connectivity |
-| Deployment   | Controlled SQL Injection |
-| Post-Test    | WAF Telemetry            |
-| Monitoring   | Log Analytics            |
-
-This creates a security-focused deployment lifecycle:
-
-```text
-Code
- │
- ▼
-Security Scan
- │
- ▼
-Validation
- │
- ▼
-Terraform Plan
- │
- ▼
-Review
- │
- ▼
-Merge
- │
- ▼
-Deployment
- │
- ▼
-Infrastructure Validation
- │
- ▼
-Security Testing
- │
- ▼
-Telemetry Verification
-```
-
----
-
-# 📁 Repository Structure
-
-```text
-azure-cloudsec-waf-lab/
-│
-├── .github/
-│   └── workflows/
-│       ├── terraform-ci.yml
-│       └── terraform-cd.yml
-│
-├── terraform/
-│   ├── provider.tf
-│   ├── variables.tf
-│   ├── resource-group.tf
-│   ├── network.tf
-│   ├── compute.tf
-│   ├── appgateway.tf
-│   ├── waf.tf
-│   ├── outputs.tf
-│   └── ...
-│
-├── scripts/
-│   └── setup_dvwa.sh
-│
-└── README.md
-```
-
----
-
-# 🚀 Getting Started
-
-## Prerequisites
-
-Install:
-
-* Terraform
-* Azure CLI
-* Git
-* An Azure subscription
-
-Authenticate to Azure:
-
-```bash
-az login
-```
-
-Select the appropriate subscription:
-
-```bash
-az account set --subscription "<SUBSCRIPTION_ID>"
-```
-
----
-
-## Clone the Repository
-
-```bash
-git clone https://github.com/olanak/azure-cloudsec-waf-lab.git
-
-cd azure-cloudsec-waf-lab
-```
-
----
-
-## Initialize Terraform
-
-```bash
-cd terraform
-
-terraform init
-```
-
----
-
-## Validate Configuration
-
-```bash
-terraform fmt -check -recursive
-
-terraform validate
-```
-
----
-
-## Review the Deployment
-
-```bash
-terraform plan
-```
-
----
-
-## Deploy
-
-```bash
-terraform apply
-```
-
----
-
-# 🧪 Security Testing
-
-After deployment, the environment can be validated manually using Azure CLI.
-
-### Check Application Gateway Backend Health
+Application Gateway probes both DVWA VMs continuously over HTTP. You can check the same thing manually:
 
 ```bash
 az network application-gateway show-backend-health \
@@ -567,28 +77,125 @@ az network application-gateway show-backend-health \
   --output json
 ```
 
-Expected result:
+If either backend comes back unhealthy, the deployment pipeline fails the run rather than reporting a false success.
 
-```text
-VM 1 → Healthy
-VM 2 → Healthy
+## CI pipeline
+
+Runs on every pull request that touches Terraform:
+
+1. Checkout
+2. Gitleaks — catches committed secrets
+3. `terraform fmt -check -recursive`
+4. `terraform init`
+5. `terraform validate`
+6. Checkov — flags cloud misconfigurations
+7. `terraform plan`, posted straight to the PR
+
+A failing plan shows up in the PR thread and fails the check — nothing gets merged blind.
+
+## CD pipeline
+
+Runs on merge to `main`:
+
+1. `terraform init` / `terraform apply`
+2. Authenticate to Azure via OIDC
+3. Pull the Application Gateway's public IP
+4. Confirm backend health
+5. Test application connectivity over HTTP
+6. Fire the controlled SQL injection test
+7. Poll Log Analytics for WAF telemetry and confirm detection
+8. Post a deployment summary
+
+## Authentication
+
+GitHub Actions authenticates to Azure with OpenID Connect instead of a stored client secret:
+
+```
+GitHub Actions → OIDC → Microsoft Entra ID → Azure Service Principal → Azure Resources
 ```
 
-### Test Application Gateway
+Enabled with `ARM_USE_OIDC: true`. The workflow needs three repository secrets:
 
-Retrieve the public IP:
+```
+AZURE_CLIENT_ID
+AZURE_SUBSCRIPTION_ID
+AZURE_TENANT_ID
+```
+
+No long-lived Azure credentials are ever stored in GitHub.
+
+## Security checks, at a glance
+
+| Stage | Control |
+|---|---|
+| Pull Request | Gitleaks |
+| Pull Request | Checkov |
+| Pull Request | Terraform Validate |
+| Pull Request | Terraform Plan |
+| Deployment | Azure OIDC |
+| Deployment | Backend Health |
+| Deployment | Application Connectivity |
+| Deployment | Controlled SQL Injection Test |
+| Post-Deployment | WAF Telemetry Verification |
+| Ongoing | Log Analytics Monitoring |
+
+## Repository structure
+
+```
+azure-cloudsec-waf-lab/
+├── .github/workflows/
+│   ├── terraform-ci.yml
+│   └── terraform-cd.yml
+├── terraform/
+│   ├── provider.tf
+│   ├── variables.tf
+│   ├── resource-group.tf
+│   ├── network.tf
+│   ├── compute.tf
+│   ├── appgateway.tf
+│   ├── waf.tf
+│   └── outputs.tf
+├── scripts/
+│   └── setup_dvwa.sh
+└── README.md
+```
+
+## Getting started
+
+You'll need Terraform, the Azure CLI, Git, and an Azure subscription.
 
 ```bash
-terraform output -raw appgw_public_ip
+az login
+az account set --subscription "<SUBSCRIPTION_ID>"
+
+git clone https://github.com/olanak/azure-cloudsec-waf-lab.git
+cd azure-cloudsec-waf-lab/terraform
+
+terraform init
+terraform fmt -check -recursive
+terraform validate
+terraform plan
+terraform apply
 ```
 
-Then:
+## Testing it manually
+
+**Check backend health**
 
 ```bash
-curl http://<APPGW_PUBLIC_IP>
+az network application-gateway show-backend-health \
+  --resource-group rg-cloudsec-lab-dev \
+  --name appgw-cloudsec-lab-dev \
+  --output json
 ```
 
-### Controlled WAF Test
+**Hit the app**
+
+```bash
+curl http://$(terraform output -raw appgw_public_ip)
+```
+
+**Trigger the WAF**
 
 ```bash
 curl --get \
@@ -596,150 +203,27 @@ curl --get \
   "http://<APPGW_PUBLIC_IP>/login.php"
 ```
 
-The request is intended to generate WAF security telemetry.
+## Observability
 
----
-
-# 📊 Observability
-
-Security events are sent to Azure Monitor / Log Analytics.
-
-The CD pipeline verifies WAF telemetry using Azure CLI and KQL.
-
-Example query:
+WAF and diagnostic events land in Log Analytics via Azure Monitor. Here's the KQL query the CD pipeline uses to confirm telemetry showed up:
 
 ```kql
 AzureDiagnostics
 | where TimeGenerated > ago(10m)
 | where Category == "ApplicationGatewayFirewallLog"
-| where action_s contains "Detected"
-    or action_s contains "Blocked"
-| where message_s contains "SQL"
-    or message_s contains "Injection"
-    or message_s contains "942"
+| where action_s contains "Detected" or action_s contains "Blocked"
+| where message_s contains "SQL" or message_s contains "Injection" or message_s contains "942"
 | order by TimeGenerated desc
 | take 5
 ```
 
-This allows the deployment pipeline to verify not only that the WAF exists, but that it is actually producing security telemetry.
+## Concepts demonstrated
 
----
+Infrastructure as Code, Terraform, Azure networking and segmentation, Application Gateway, Web Application Firewall (OWASP CRS), Linux administration, availability sets, load balancing and health probes, Network Security Groups, Azure Monitor and Log Analytics, KQL, CI/CD with GitHub Actions, OIDC authentication, security-as-code, IaC scanning, secret detection, and automated security validation.
 
-# 💡 Key Engineering Concepts Demonstrated
-
-This project demonstrates practical experience with:
-
-* Infrastructure as Code
-* Terraform
-* Azure networking
-* Network segmentation
-* Application Gateway
-* Web Application Firewall
-* OWASP CRS
-* Linux administration
-* Availability Sets
-* Load balancing
-* Health probes
-* Network Security Groups
-* Azure Monitor
-* Log Analytics
-* KQL
-* DevSecOps
-* CI/CD
-* GitHub Actions
-* OIDC authentication
-* Security-as-Code
-* Infrastructure security scanning
-* Secret detection
-* Automated security validation
-
----
-
-# 🎓 What This Project Demonstrates
-
-This is more than a Terraform deployment.
-
-It demonstrates a complete **cloud security engineering workflow**:
-
-```text
-                    ┌─────────────────┐
-                    │ Infrastructure  │
-                    │      Code       │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Security Scan   │
-                    │ Gitleaks/       │
-                    │ Checkov         │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Terraform Plan  │
-                    └────────┬────────┘
-                             │
-                             ▼
-                         Code Review
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Terraform Apply │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Infrastructure  │
-                    │   Validation    │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Security Test   │
-                    │      WAF        │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Security Logs   │
-                    │ Log Analytics   │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │ Automated       │
-                    │ Verification    │
-                    └─────────────────┘
-```
-
-The result is an automated **Cloud Security + Infrastructure as Code + DevSecOps** workflow rather than simply a collection of Azure resources.
-
-
-
----
-
-# 👤 Author
+## Author
 
 **Olana Kenea Lemesa**
+Cloud Security Engineer · GRC · Infrastructure as Code
 
-Cloud Security Engineer | GRC | Infrastructure-as-Code
-
-Focused on:
-
-* Cloud Security
-* Azure
-* Terraform
-* DevSecOps
-* Infrastructure Security
-* IAM
-* Security Automation
-
----
-
-## ⭐ If you find this project useful
-
-Feel free to explore the repository, review the Terraform configuration, and inspect the **GitHub Actions CI/CD workflows** to see how infrastructure security and post-deployment validation are automated.
-
-**[View Repository →](https://github.com/olanak/azure-cloudsec-waf-lab)**
-**[View CI Pipeline →](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-ci.yml)**
-**[View CD Pipeline →](https://github.com/olanak/azure-cloudsec-waf-lab/actions/workflows/terraform-cd.yml)**
+Focused on cloud security, Azure, Terraform, DevSecOps, IAM, and security automation.
