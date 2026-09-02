@@ -24,13 +24,13 @@ resource "azurerm_application_gateway" "appgw" {
   }
 
   probe {
-    name                                      = "dvwa-health-probe"
-    protocol                                  = "Http"
-    host                                      = "127.0.0.1"
-    path                                      = "/"
-    interval                                  = 30
-    timeout                                   = 30
-    unhealthy_threshold                       = 3
+    name                = "dvwa-health-probe"
+    protocol            = "Http"
+    host                = "127.0.0.1"
+    path                = "/"
+    interval            = 30
+    timeout             = 30
+    unhealthy_threshold = 3
     match {
       status_code = ["200-399"]
     }

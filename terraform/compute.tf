@@ -46,7 +46,7 @@ resource "azurerm_linux_virtual_machine" "vm-dvwa" {
     sku       = "22_04-lts-gen2"
     version   = "latest"
   }
-#comment to trigger a new commit to test the CI/CD pipeline
+  #comment to trigger a new commit to test the CI/CD pipeline
 
   admin_ssh_key {
     username   = var.admin_username
