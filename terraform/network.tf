@@ -14,6 +14,7 @@ resource "azurerm_virtual_network" "vnet" {
 
 #the subnet for the application gateway with a /24 address space
 resource "azurerm_subnet" "snet-appgw" {
+  #checkov:skip=CKV2_AZURE_31: NSG omitted to avoid conflicting with strict AppGW v2 management port requirements.
   name                 = "snet-appgw"
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name

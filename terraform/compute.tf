@@ -33,6 +33,7 @@ resource "azurerm_linux_virtual_machine" "vm-dvwa" {
   admin_username                  = var.admin_username
   network_interface_ids           = [azurerm_network_interface.nic-dvwa[count.index].id]
   availability_set_id             = azurerm_availability_set.aset-dvwa.id
+  allow_extension_operations      = false
   disable_password_authentication = true
 
   os_disk {
@@ -46,7 +47,7 @@ resource "azurerm_linux_virtual_machine" "vm-dvwa" {
     sku       = "22_04-lts-gen2"
     version   = "latest"
   }
-
+  #comment to trigger a new commit to test the CI/CD pipeline
 
   admin_ssh_key {
     username   = var.admin_username
