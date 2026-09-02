@@ -147,13 +147,28 @@ jobs:
           echo "✅ Controlled SQL injection request sent."
 
 
-    
-      # 10. Wait for WAF Telemetry
-      - name: Wait for WAF Telemetry
+      # 10. Wait & Verify WAF Telemetry in Log Analytics
+      - name: Wait and Verify WAF Telemetry
         working-directory: ./terraform
         run: |
-          echo "Waiting for WAF telemetry to reach Log Analytics..."
+          echo "Resolving Log Analytics Workspace ID..."
+          TF_OUTPUT=$(terraform output -raw log_analytics_workspace_id)
+          
+          # Check if Terraform output is already a UUID. If not, look up the UUID by name via Azure CLI.
+          if [[ "$TF_OUTPUT" =~ ^[0-9a-fA-F]{8}- ]]; then
+            LOG_ANALYTICS_WORKSPACE=$TF_OUTPUT
+          else
+            LOG_ANALYTICS_WORKSPACE=$(az monitor log-analytics workspace list --query "[?name=='$TF_OUTPUT'].customerId" -o tsv)
+          fi
+          
+          echo "Debugging Target Workspace GUID: '$LOG_ANALYTICS_WORKSPACE'"
+          
+          if [ -z "$LOG_ANALYTICS_WORKSPACE" ]; then
+            echo "❌ Could not resolve Workspace GUID. Exiting."
+            exit 1
+          fi
 
+          echo "Waiting for WAF telemetry to reach Log Analytics..."
           MAX_ATTEMPTS=12
           ATTEMPT=1
 
@@ -168,65 +183,29 @@ jobs:
             | order by TimeGenerated desc
             | take 5'
 
-            echo "Debugging Workspace ID: '$LOG_ANALYTICS_WORKSPACE'"
-
             RESULT=$(az monitor log-analytics query \
               --workspace "$LOG_ANALYTICS_WORKSPACE" \
               --analytics-query "$QUERY" \
               --output json)
 
-            
-
+            # Check if the JSON result is not empty
             if [ "$RESULT" != "[]" ] && [ -n "$RESULT" ]; then
-              echo "✅ WAF security event detected."
+              echo "✅ WAF security event detected!"
               echo "$RESULT"
               exit 0
             fi
 
             echo "No WAF event found yet. Waiting 10 seconds..."
             sleep 10
-
             ATTEMPT=$((ATTEMPT + 1))
           done
 
-          echo "❌ No WAF security event detected after 2 minutes."
+          echo "❌ No WAF security event detected after 2 minutes. The attack may not have triggered a rule."
           exit 1
 
 
-      # ============================================================
-      # 11. Verify WAF Detection in Log Analytics
-      # ============================================================
-      - name: Verify WAF Detection
-        run: |
-          echo "Querying Log Analytics for WAF detection..."
-
-          QUERY='AzureDiagnostics
-          | where TimeGenerated > ago(10m)
-          | where Category == "ApplicationGatewayFirewallLog"
-          | where action_s contains "Detected" or action_s contains "Blocked"
-          | where message_s contains "SQL" or message_s contains "Injection" or message_s contains "942"
-          | order by TimeGenerated desc
-          | take 5'
-
-          RESULT=$(az monitor log-analytics query \
-            --workspace "$LOG_ANALYTICS_WORKSPACE" \
-            --analytics-query "$QUERY" \
-            --output json)
-
-          echo "WAF query result:"
-          echo "$RESULT"
-
-          if [ "$RESULT" = "[]" ] || [ -z "$RESULT" ]; then
-            echo "❌ No matching WAF security event was found."
-            echo "The WAF test may not have generated telemetry."
-            exit 1
-          fi
-
-          echo "✅ WAF security event detected in Log Analytics."
-
-
       
-      # 12. Deployment & Security Summary
+      # 11. Deployment & Security Summary
       - name: Deployment Summary
         if: always()
         run: |
