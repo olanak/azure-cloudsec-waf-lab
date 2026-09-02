@@ -7,6 +7,8 @@ resource "azurerm_public_ip" "appgw_public_ip" {
 }
 
 resource "azurerm_application_gateway" "appgw" {
+  #checkov:skip=CKV_AZURE_217: Lab environment uses HTTP; no SSL/TLS cert configured.
+  #checkov:skip=CKV_AZURE_218: Lab environment uses HTTP; no SSL/TLS cert configured.
   name                = "appgw-cloudsec-lab-dev"
   location            = var.location
   resource_group_name = azurerm_resource_group.rg.name
