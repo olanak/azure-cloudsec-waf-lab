@@ -35,6 +35,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Inject SSH Public Key
+        working-directory: ./terraform
+        run: echo "${{ secrets.VM_SSH_PUB_KEY }}" > id_rsa.pub
 
       # 2. Setup Terraform
       - name: Setup Terraform
