@@ -176,11 +176,10 @@ jobs:
             echo "Checking for WAF event (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
 
             QUERY='AzureDiagnostics
-            | where TimeGenerated > ago(10m)
+            | where TimeGenerated > ago(15m)
             | where Category == "ApplicationGatewayFirewallLog"
-            | where action_s contains "Detected" or action_s contains "Blocked"
-            | where message_s contains "SQL" or message_s contains "Injection" or message_s contains "942"
-            | order by TimeGenerated desc
+            | search "Detected" or "Blocked"
+            | search "SQL" or "Injection" or "942"
             | take 5'
 
             RESULT=$(az monitor log-analytics query \
