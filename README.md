@@ -12,6 +12,9 @@
 An end-to-end Azure cloud security and DevSecOps lab, built with Terraform. It deploys an intentionally vulnerable web app behind Azure Application Gateway WAF, adds network segmentation and backend health monitoring, and wires everything into a GitHub Actions pipeline that validates the infrastructure, the security controls, and the WAF telemetry on every change.
 
 ---
+![WAF Telemetry Dashboard](./assets/architecture.png)
+
+---
 
 ## Project Goals and Architecture
 
