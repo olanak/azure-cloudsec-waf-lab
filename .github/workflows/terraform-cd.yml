@@ -150,6 +150,7 @@ jobs:
     
       # 10. Wait for WAF Telemetry
       - name: Wait for WAF Telemetry
+        working-directory: ./terraform
         run: |
           echo "Waiting for WAF telemetry to reach Log Analytics..."
 
@@ -167,8 +168,8 @@ jobs:
             | order by TimeGenerated desc
             | take 5'
 
-            echo "Debugging Workspace ID: '$WORKSPACE_ID'"
-            
+            echo "Debugging Workspace ID: '$LOG_ANALYTICS_WORKSPACE'"
+
             RESULT=$(az monitor log-analytics query \
               --workspace "$LOG_ANALYTICS_WORKSPACE" \
               --analytics-query "$QUERY" \
