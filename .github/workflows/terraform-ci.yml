@@ -33,10 +33,7 @@ jobs:
           fetch-depth: 0
       
       - name: Inject SSH Public Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VM_SSH_PUB_KEY }}" > ~/.ssh/id_rsa.pub
-          chmod 600 ~/.ssh/id_rsa.pub
+        run: echo "${{ secrets.VM_SSH_PUB_KEY }}" > ./terraform/id_rsa.pub
 
       # 2. Scan repository for accidentally committed secrets
       - name: Run Gitleaks
